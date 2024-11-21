@@ -3,68 +3,18 @@ import pandas as pd
 import plotly.express as px
 import torch
 import librosa
-import numpy as np
-import os
-from io import BytesIO
 from PIL import Image
 from transformers import Wav2Vec2Processor, Wav2Vec2ForSequenceClassification
-import tempfile
 
-# Fonction pour charger uniquement le processeur
-def load_processor(processor_path="facebook/wav2vec2-base"):
-    """
-    Charge uniquement le processeur depuis Hugging Face ou un chemin local.
-    """
+# Charger le modèle et le processeur pour la prédiction
+def load_model_and_processor(model_path, processor_path='facebook/wav2vec2-base'):
+    model = Wav2Vec2ForSequenceClassification.from_pretrained(model_path)
     processor = Wav2Vec2Processor.from_pretrained(processor_path)
-    print(f"Processor chargé depuis {processor_path}")
-    return processor
-
-# Fonction pour reconstruire le fichier modèle dans un flux en mémoire
-def reconstruct_model_in_memory(parts_folder="model_and_processor", part_prefix="model_part_"):
-    """
-    Reconstruit un fichier modèle à partir de parties et le retourne dans un flux en mémoire.
-    """
-    # Lister les fichiers disponibles
-    part_files = sorted([f for f in os.listdir(parts_folder) if f.startswith(part_prefix)])
-    if not part_files:
-        raise FileNotFoundError(f"No model parts found to reconstruct in folder {parts_folder}. Ensure all parts are present.")
-    
-    print(f"Parts found: {part_files}")
-    
-    # Reconstruction dans un flux en mémoire
-    model_stream = BytesIO()
-    for part_file in part_files:
-        part_path = os.path.join(parts_folder, part_file)
-        print(f"Adding {part_path} to the in-memory stream")
-        with open(part_path, "rb") as pf:
-            model_stream.write(pf.read())
-    
-    model_stream.seek(0)  # Revenir au début du flux
-    print("Model reconstruction completed in memory")
-    return model_stream
-
-# Fonction pour charger le modèle à partir d'un flux en mémoire
-def load_model_from_stream(model_stream):
-    """
-    Charge un modèle Hugging Face à partir d'un flux en mémoire en utilisant un fichier temporaire.
-    """
-    with tempfile.NamedTemporaryFile(suffix=".safetensors") as temp_file:
-        # Écrire le flux dans un fichier temporaire
-        temp_file.write(model_stream.read())
-        temp_file.flush()  # S'assurer que les données sont écrites sur le disque
-        
-        # Charger le modèle depuis le fichier temporaire
-        with torch.no_grad():
-            model = Wav2Vec2ForSequenceClassification.from_pretrained(temp_file.name)
-            model.eval()
-            print("Modèle chargé depuis le fichier temporaire")
-            return model
+    model.eval()
+    return model, processor
 
 # Prédiction de sentiment à partir d'un fichier audio
 def predict_sentiment(audio_path, model, processor, inverse_label_map, max_length=32000):
-    """
-    Prédiction du sentiment à partir d'un fichier audio.
-    """
     # Charger et traiter l'audio
     speech, sr = librosa.load(audio_path, sr=16000)
     speech = speech[:max_length] if len(speech) > max_length else np.pad(speech, (0, max_length - len(speech)), 'constant')
@@ -75,7 +25,9 @@ def predict_sentiment(audio_path, model, processor, inverse_label_map, max_lengt
         outputs = model(input_values)
     logits = outputs.logits
     predicted_class = logits.argmax(dim=-1).item()
+    print(f"le predicted_class est ::::::::::::::::{predicted_class}")
     sentiment = inverse_label_map[predicted_class]
+    print(f"le sentiment est ::::::::::::::::{sentiment}")
     return sentiment
 
 def predict_sentiment_load(audio, model, processor, inverse_label_map_audio, max_length=32000):
@@ -128,34 +80,27 @@ def exploratory_analysis(df):
     st.write("Exemples de données :")
     st.dataframe(df.sample(5))
 
-
 # Fonction principale pour afficher le dashboard
 def main():
     st.set_page_config(page_title="Dashboard d'Analyse de Sentiment Audio", layout="wide")
-    st.image("images/banner.jpg", width=400)
+    left_co, cent_co, last_co = st.columns(3)
+    with cent_co:
+        st.image("images/banner.jpg", width=400)
 
     st.sidebar.title("Options du Dashboard")
     st.sidebar.write("Utilisez cette barre pour naviguer dans les options.")
     
-    # Charger les données
+    # Charger les données fictives
     df = pd.read_csv('ravdess_streamlit.csv')
     df_audio = df.head(43)
 
-    # Charger le processeur
-    processor = load_processor("facebook/wav2vec2-base")
-    
-    # Reconstruire le modèle en mémoire et le charger
-    try:
-        model_stream = reconstruct_model_in_memory(parts_folder="model_and_processor")
-        model = load_model_from_stream(model_stream)
-    except Exception as e:
-        st.error(f"Erreur lors du chargement du modèle : {e}")
-        return
-    
-    # Mapper les labels prédits à leurs significations
-    inverse_label_map = {0: 'neutral', 1: 'positif', 2: 'positif', 3: 'negatif', 4: 'negatif', 5: 'negatif'}
+    # Charger le modèle et le processeur pour les prédictions
+    checkpoint_dir = "./results/checkpoint-459"  # Remplacez par le chemin de votre modèle
+    model, processor = load_model_and_processor(checkpoint_dir)
+    inverse_label_map = {0: 'neutral', 1: 'positif', 2: 'positif', 3: 'negatif', 4: 'negatif', 5: 'negatif'}  # Remplacez par votre map
+    #inverse_label_map_audio = {'neutral': 0, 'calm': 'positif', 'happy': 'positif', 'sad': "negatif", 'angry': "negatif", 'fear': "negatif"}  # Remplacez par votre map
 
-    # Options du tableau de bord
+    # Afficher un widget pour sélectionner l'analyse ou la prédiction
     option = st.sidebar.selectbox("Choisissez une option :", ["Analyse exploratoire", "Prédiction de sentiment", "Prédire sentiment sur fichier audio"])
 
     if option == "Analyse exploratoire":
@@ -173,6 +118,16 @@ def main():
         if st.button("Prédire le sentiment"):
             sentiment = predict_sentiment(audio_id, model, processor, inverse_label_map)
             st.write(f"### Le sentiment prédit pour cet audio est : **{sentiment}**")
+            # Afficher une image de sentiment si la prédiction est effectuée
+            if sentiment:
+                # Charger les images locales pour chaque sentiment
+                sentiment_images = {
+                    "positif": Image.open("images/positif.jpg"),
+                    "neutral": Image.open("images/neutre.jpg"),
+                    "negatif": Image.open("images/negatif.jpg")
+                }
+                st.image(sentiment_images[sentiment], width=150, caption=f"Sentiment : {sentiment}")
+
 
     elif option == "Prédire sentiment sur fichier audio":
         st.subheader("🎤 Prédiction de sentiment pour un fichier audio uploadé")
@@ -186,6 +141,15 @@ def main():
             if st.button("Prédire le sentiment"):
                 sentiment = predict_sentiment("uploaded_audio.wav", model, processor, inverse_label_map)
                 st.write(f"### Le sentiment prédit pour cet audio est : **{sentiment}**")
+                # Afficher une image de sentiment si la prédiction est effectuée
+                if sentiment:
+                    # Charger les images locales pour chaque sentiment
+                    sentiment_images = {
+                        "positif": Image.open("images/positif.jpg"),
+                        "neutral": Image.open("images/neutre.jpg"),
+                        "negatif": Image.open("images/negatif.jpg")
+                    }
+                    st.image(sentiment_images[sentiment], width=150, caption=f"Sentiment : {sentiment}")
 
 
 if __name__ == "__main__":
