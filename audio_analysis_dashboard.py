@@ -5,46 +5,204 @@ import torch
 import librosa
 from PIL import Image
 from transformers import Wav2Vec2Processor, Wav2Vec2ForSequenceClassification
+import torch.nn as nn
+import torchvision.models as models
+import torchvision.transforms as transforms
+import matplotlib.pyplot as plt
+import numpy as np
+# Import des fonctions fournies
+from sklearn.preprocessing import StandardScaler
+import librosa.display
+import os
 
-# Charger le modèle et le processeur pour la prédiction
-def load_model_and_processor(model_path, processor_path='facebook/wav2vec2-base'):
-    model = Wav2Vec2ForSequenceClassification.from_pretrained(model_path)
-    processor = Wav2Vec2Processor.from_pretrained(processor_path)
-    model.eval()
-    return model, processor
+class CustomResNet18(nn.Module):
+    def __init__(self, num_classes=6):
+        super(CustomResNet18, self).__init__()
 
-# Prédiction de sentiment à partir d'un fichier audio
-def predict_sentiment(audio_path, model, processor, inverse_label_map, max_length=32000):
-    # Charger et traiter l'audio
-    speech, sr = librosa.load(audio_path, sr=16000)
-    speech = speech[:max_length] if len(speech) > max_length else np.pad(speech, (0, max_length - len(speech)), 'constant')
-    inputs = processor(speech, sampling_rate=16000, return_tensors='pt', padding=True)
-    input_values = inputs.input_values
-    # Obtenir les prédictions du modèle
-    with torch.no_grad():
-        outputs = model(input_values)
-    logits = outputs.logits
-    predicted_class = logits.argmax(dim=-1).item()
-    print(f"le predicted_class est ::::::::::::::::{predicted_class}")
-    sentiment = inverse_label_map[predicted_class]
-    print(f"le sentiment est ::::::::::::::::{sentiment}")
-    return sentiment
+        # Charger ResNet18
+        self.resnet = models.resnet18(pretrained=True)
+        self.resnet.avgpool = nn.AdaptiveAvgPool2d((1, 1))
 
-def predict_sentiment_load(audio, model, processor, inverse_label_map_audio, max_length=32000):
-    # Charger et traiter l'audio
-    speech = librosa.load(audio, sr=16000)
-    speech = speech[:max_length] if len(speech) > max_length else np.pad(speech, (0, max_length - len(speech)), 'constant')
-    inputs = processor(speech, sampling_rate=16000, return_tensors='pt', padding=True)
-    input_values = inputs.input_values
-    # Obtenir les prédictions du modèle
-    with torch.no_grad():
-        outputs = model(input_values)
-    logits = outputs.logits
-    predicted_class = logits.argmax(dim=-1).item()
-    print(f"le predicted_class est ::::::::::::::::{predicted_class}")
-    sentiment = inverse_label_map_audio[predicted_class]
-    print(f"le sentiment est ::::::::::::::::{sentiment}")
-    return sentiment
+        # Remplacer la couche fully connected
+        self.resnet.fc = nn.Sequential(
+            nn.Linear(self.resnet.fc.in_features, 128),
+            nn.BatchNorm1d(128),
+            nn.LeakyReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(128, num_classes)
+        )
+
+        # Fine-tuning des dernières couches
+        for param in self.resnet.parameters():
+            param.requires_grad = False
+
+        for param in self.resnet.layer4.parameters():
+            param.requires_grad = True
+
+        for param in self.resnet.fc.parameters():
+            param.requires_grad = True
+
+    def forward(self, x):
+        return self.resnet(x)
+    
+
+# Fonction pour charger un modèle sauvegardé
+def load_model(checkpoint_path, num_classes=6):
+    # Initialiser le modèle
+    model = CustomResNet18(num_classes=num_classes)
+
+    # Charger le checkpoint
+    checkpoint = torch.load(checkpoint_path)
+
+    # Si les poids sont quantifiés, les déquantifier
+    for key, value in checkpoint.items():
+        if isinstance(value, torch.Tensor) and value.is_quantized:
+            checkpoint[key] = value.dequantize()
+
+    # Charger les poids en ignorant les clés manquantes/inattendues
+    model.load_state_dict(checkpoint, strict=False)
+
+    return model
+
+
+# Définir les paramètres nécessaires
+sample_rate = 16000
+n_mels = 128
+hop_length = 512
+fmax = 8000
+output_dir = "processed_images"  # Répertoire pour les images générées
+
+# Définir les transformations pour ResNet
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),  # Redimensionner
+    transforms.ToTensor(),           # Convertir en tenseur
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
+
+def extract_mel_spectrogram(file_path, sample_rate, output_file, n_mels, hop_length, fmax, label):
+    try:
+        audio, sr = librosa.load(file_path, sr=sample_rate)
+        mel_spect = librosa.feature.melspectrogram(y=audio, sr=sr, n_mels=n_mels, hop_length=hop_length, fmax=fmax)
+        mel_spect_db = librosa.power_to_db(mel_spect, ref=np.max)
+
+        # Générer un nom de fichier cohérent avec le label
+        output_file = os.path.join(output_dir, f"{label}.png")
+        plt.figure(figsize=(10, 4))
+        librosa.display.specshow(mel_spect_db, sr=sample_rate, hop_length=hop_length, x_axis='time', y_axis='mel')
+        plt.axis('off') 
+        plt.savefig(output_file, bbox_inches='tight', pad_inches=0)
+        plt.close()
+        return output_file
+    except Exception as e: 
+        print(f"Error processing file {file_path}: {e}")
+        return None
+
+def extract_llf_features(audio_data, sr, n_fft, win_length, hop_length, label):
+    try:
+        # Assurez-vous que toutes les valeurs nécessaires sont calculées correctement
+        rms = librosa.feature.rms(y=audio_data, frame_length=win_length, hop_length=hop_length, center=False)
+        
+        # Si vous empilez des caractéristiques LLF, assurez-vous qu'aucun élément ne contient "..."
+        feats = np.vstack([rms])  # Ajoutez toutes les caractéristiques calculées ici
+        feats = librosa.power_to_db(feats)
+        
+        # Normalisation
+        scaler = StandardScaler()
+        feats = scaler.fit_transform(feats.T).T
+
+        # Sauvegarder l'image
+        output_file = os.path.join(output_dir, f"{label}_llf.png")
+        plt.figure(figsize=(10, 4))
+        plt.imshow(feats, aspect='auto', origin='lower', cmap='viridis')
+        plt.axis('off')
+        plt.savefig(output_file, bbox_inches='tight', pad_inches=0)
+        plt.close()
+
+        return output_file
+    except Exception as e:
+        print(f"Error extracting LLF features: {e}")
+        return None
+
+
+def combine_images_if_same_filename(mel_spectrogram_path, llf_path, output_dir):
+    try:
+        # Vérifiez si les fichiers existent
+        if mel_spectrogram_path is None or llf_path is None:
+            print("One or both files do not exist. Skipping combination.")
+            return None
+
+        mel_filename = os.path.basename(mel_spectrogram_path).split('_')[0]
+        llf_filename = os.path.basename(llf_path).split('_')[0]
+
+        if mel_filename == llf_filename:
+            print(f"Combining {mel_filename} and {llf_filename}")
+
+            # Charger les images
+            mel_img = Image.open(mel_spectrogram_path)
+            llf_img = Image.open(llf_path)
+
+            # Ajustement des dimensions et combinaison
+            new_width = max(mel_img.width, llf_img.width)
+            new_height = max(mel_img.height, llf_img.height)
+            mel_img = mel_img.resize((new_width, new_height))
+            llf_img = llf_img.resize((new_width, new_height))
+
+            # Combinaison
+            combined_img = np.vstack((np.array(mel_img), np.array(llf_img)))
+            combined_img = Image.fromarray(combined_img)
+
+            # Sauvegarde
+            output_file = os.path.join(output_dir, f"{mel_filename}_combined.png")
+            combined_img.save(output_file)
+
+            return output_file
+        else:
+            print(f"Filenames do not match: {mel_filename} and {llf_filename}. Skipping.")
+            return None
+    except Exception as e:
+        print(f"Error combining images: {e}")
+        return None
+
+
+
+# Fonction pour préparer l'entrée du modèle
+def prepare_audio_for_resnet(audio_path, output_dir, model):
+    try:
+
+        label = os.path.basename(audio_path).split('.')[0]
+
+        # Étape 1 : Générer le spectrogramme Mel
+        mel_file = extract_mel_spectrogram(audio_path, sample_rate, None, n_mels, hop_length, fmax, label)
+
+        
+        # Étape 2 : Extraire les caractéristiques LLF
+        audio_data, sr = librosa.load(audio_path, sr=sample_rate)
+        n_fft = 2048
+        win_length = n_fft
+        llf_file = extract_llf_features(audio_data, sr, n_fft, win_length, hop_length, label)
+        
+        # Étape 3 : Combiner les images Mel spectrogram et LLF
+        combined_file  = combine_images_if_same_filename(mel_file, llf_file, output_dir)
+        if not combined_file :
+            raise ValueError("Impossible de combiner les images.")
+        
+        # Étape 4 : Charger et transformer l'image combinée
+        combined_image = Image.open(combined_file ).convert("RGB")
+        transformed_image = transform(combined_image).unsqueeze(0)  # Ajouter une dimension batch
+        
+        # Étape 5 : Faire une prédiction avec le modèle ResNet
+        model.eval()
+        with torch.no_grad():
+            outputs = model(transformed_image)
+            predicted_class = outputs.argmax(dim=1).item()
+
+        class_map_bis = {0: 'neutral', 1: 'positif', 2: 'positif', 3: 'negatif', 4: 'negatif', 5: 'negatif'}
+        return class_map_bis[predicted_class]
+    
+    except Exception as e:
+        print(f"Erreur dans le traitement de l'audio : {e}")
+        return None
+
 
 # Fonction d'analyse exploratoire
 def exploratory_analysis(df):
@@ -93,41 +251,23 @@ def main():
     # Charger les données fictives
     df = pd.read_csv('ravdess_streamlit.csv')
     df_audio = df.head(43)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Charger le modèle et le processeur pour les prédictions
-    checkpoint_dir = "./results/checkpoint-459"  # Remplacez par le chemin de votre modèle
-    model, processor = load_model_and_processor(checkpoint_dir)
-    inverse_label_map = {0: 'neutral', 1: 'positif', 2: 'positif', 3: 'negatif', 4: 'negatif', 5: 'negatif'}  # Remplacez par votre map
-    #inverse_label_map_audio = {'neutral': 0, 'calm': 'positif', 'happy': 'positif', 'sad': "negatif", 'angry': "negatif", 'fear': "negatif"}  # Remplacez par votre map
+    # Charger le modèle
+    checkpoint_path = "model_and_processor/model_resnet18_V2.pth"
+    model = load_model(checkpoint_path)
 
+    # Mettre le modèle en mode évaluation
+    model.eval()
+   
+    # Dictionnaire pour mapper les classes à des sentiments
+    class_map = {0: 'neutral', 1: 'positif', 2: 'positif', 3: 'negatif', 4: 'negatif', 5: 'positif'}
+    
     # Afficher un widget pour sélectionner l'analyse ou la prédiction
-    option = st.sidebar.selectbox("Choisissez une option :", ["Analyse exploratoire", "Prédiction de sentiment", "Prédire sentiment sur fichier audio"])
+    option = st.sidebar.selectbox("Choisissez une option :", ["Analyse exploratoire", "Prédire sentiment sur fichier audio"])
 
     if option == "Analyse exploratoire":
         exploratory_analysis(df)
-
-    elif option == "Prédiction de sentiment":
-        st.subheader("🎧 Prédiction du sentiment pour un fichier audio")
-        audio_id = st.sidebar.selectbox("Choisir un ID audio :", df_audio['Path'].unique())
-        audio_info = df[df['Path'] == audio_id].iloc[0]
-
-        st.write("### Informations sur l'audio sélectionné :")
-        st.write(f"- **Genre :** {audio_info['Gender']}")
-        st.write(f"- **Emotion réelle :** {audio_info['Emotion_Category']}")
-
-        if st.button("Prédire le sentiment"):
-            sentiment = predict_sentiment(audio_id, model, processor, inverse_label_map)
-            st.write(f"### Le sentiment prédit pour cet audio est : **{sentiment}**")
-            # Afficher une image de sentiment si la prédiction est effectuée
-            if sentiment:
-                # Charger les images locales pour chaque sentiment
-                sentiment_images = {
-                    "positif": Image.open("images/positif.jpg"),
-                    "neutral": Image.open("images/neutre.jpg"),
-                    "negatif": Image.open("images/negatif.jpg")
-                }
-                st.image(sentiment_images[sentiment], width=150, caption=f"Sentiment : {sentiment}")
-
 
     elif option == "Prédire sentiment sur fichier audio":
         st.subheader("🎤 Prédiction de sentiment pour un fichier audio uploadé")
@@ -139,18 +279,15 @@ def main():
             st.audio(audio_file, format="audio/wav")
 
             if st.button("Prédire le sentiment"):
-                sentiment = predict_sentiment("uploaded_audio.wav", model, processor, inverse_label_map)
+                sentiment = prepare_audio_for_resnet("uploaded_audio.wav", output_dir, model)
                 st.write(f"### Le sentiment prédit pour cet audio est : **{sentiment}**")
-                # Afficher une image de sentiment si la prédiction est effectuée
                 if sentiment:
-                    # Charger les images locales pour chaque sentiment
                     sentiment_images = {
                         "positif": Image.open("images/positif.jpg"),
                         "neutral": Image.open("images/neutre.jpg"),
                         "negatif": Image.open("images/negatif.jpg")
                     }
                     st.image(sentiment_images[sentiment], width=150, caption=f"Sentiment : {sentiment}")
-
 
 if __name__ == "__main__":
     main()
