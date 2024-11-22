@@ -14,6 +14,7 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 import librosa.display
 import os
+import torchvision
 
 class CustomResNet18(nn.Module):
     def __init__(self, num_classes=6):
