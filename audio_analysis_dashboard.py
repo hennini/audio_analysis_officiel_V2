@@ -16,6 +16,7 @@ import librosa.display
 import os
 import torchvision
 
+
 class CustomResNet18(nn.Module):
     def __init__(self, num_classes=6):
         super(CustomResNet18, self).__init__()
