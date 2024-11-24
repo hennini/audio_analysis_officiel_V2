@@ -208,41 +208,127 @@ def prepare_audio_for_resnet(audio_path, output_dir, model):
 
 # Fonction d'analyse exploratoire
 def exploratory_analysis(df):
+    """
+    Analyse exploratoire des données avec des critères d'accessibilité WCAG.
+    Fournit des graphiques interactifs, des descriptions textuelles et des couleurs accessibles.
+    """
     st.subheader("🔍 Analyse exploratoire des données")
-    st.write("Statistiques descriptives des données :")
+    st.write(
+        """
+        Cette section fournit une vue d'ensemble des données, notamment des statistiques descriptives et 
+        des visualisations pour comprendre les tendances principales.
+        """
+    )
+
+    # Statistiques descriptives
+    st.write("### Statistiques descriptives des données")
+    st.write("Voici une vue d'ensemble statistique des colonnes du jeu de données :")
     st.write(df.describe(include='all'))
 
+    # Graphique 1 : Répartition des émotions (Camembert)
+    st.write("### Répartition des émotions")
     emotion_counts = df['Emotion'].value_counts()
-    fig_emotion = px.pie(values=emotion_counts, names=emotion_counts.index, title="Répartition des émotions", color_discrete_sequence=px.colors.qualitative.Set3)
+    fig_emotion = px.pie(
+        values=emotion_counts,
+        names=emotion_counts.index,
+        title="Répartition des émotions",
+        color_discrete_sequence=px.colors.sequential.Viridis
+    )
     st.plotly_chart(fig_emotion, use_container_width=True)
+    st.markdown("**Description :** Ce graphique montre la proportion des différentes émotions dans le jeu de données.")
 
+    # Graphique 2 : Intensité des émotions (Barres)
+    st.write("### Intensité des émotions")
     intensity_counts = df['Emotion intensity'].value_counts()
-    fig_intensity = px.bar(x=intensity_counts.index, y=intensity_counts.values, title="Intensité des émotions", labels={'x': 'Intensité', 'y': 'Nombre'}, color=intensity_counts.index, color_discrete_sequence=px.colors.qualitative.Pastel)
+    fig_intensity = px.bar(
+        x=intensity_counts.index,
+        y=intensity_counts.values,
+        title="Distribution de l'intensité des émotions",
+        labels={'x': 'Intensité', 'y': 'Nombre'},
+        color=intensity_counts.index,
+        color_discrete_sequence=px.colors.sequential.Cividis
+    )
     st.plotly_chart(fig_intensity, use_container_width=True)
+    st.markdown("**Description :** Ce graphique montre la distribution des émotions selon leur intensité.")
 
+    # Graphique 3 : Répartition des genres (Barres)
+    st.write("### Répartition des genres")
     gender_counts = df['Gender'].value_counts()
-    fig_gender = px.bar(x=gender_counts.index, y=gender_counts.values, title="Répartition des genres", labels={'x': 'Genre', 'y': 'Nombre'}, color=gender_counts.index, color_discrete_sequence=px.colors.qualitative.Prism)
+    fig_gender = px.bar(
+        x=gender_counts.index,
+        y=gender_counts.values,
+        title="Distribution par genre",
+        labels={'x': 'Genre', 'y': 'Nombre'},
+        color=gender_counts.index,
+        color_discrete_sequence=px.colors.sequential.Plasma
+    )
     st.plotly_chart(fig_gender, use_container_width=True)
+    st.markdown("**Description :** Ce graphique montre le nombre de données pour chaque genre.")
 
-    fig_emotion_intensity = px.histogram(df, x='Emotion', color='Emotion intensity', barmode='group', title="Répartition des émotions par intensité", color_discrete_sequence=px.colors.qualitative.Set2)
+    # Graphique 4 : Emotions par intensité
+    st.write("### Répartition des émotions par intensité")
+    fig_emotion_intensity = px.histogram(
+        df,
+        x='Emotion',
+        color='Emotion intensity',
+        barmode='group',
+        title="Répartition des émotions selon leur intensité",
+        color_discrete_sequence=px.colors.sequential.Blues
+    )
     st.plotly_chart(fig_emotion_intensity, use_container_width=True)
+    st.markdown("**Description :** Ce graphique montre comment chaque émotion se répartit selon les intensités.")
 
-    fig_emotion_gender = px.histogram(df, x='Emotion', color='Gender', barmode='group', title="Répartition des émotions par genre", color_discrete_sequence=px.colors.qualitative.Dark2)
+    # Graphique 5 : Emotions par genre
+    st.write("### Répartition des émotions par genre")
+    fig_emotion_gender = px.histogram(
+        df,
+        x='Emotion',
+        color='Gender',
+        barmode='group',
+        title="Répartition des émotions par genre",
+        color_discrete_sequence=px.colors.sequential.Purp
+    )
     st.plotly_chart(fig_emotion_gender, use_container_width=True)
+    st.markdown("**Description :** Ce graphique montre la répartition des émotions pour chaque genre.")
 
+    # Graphique 6 : Répartition des catégories réduites d'émotions
+    st.write("### Répartition des catégories d'émotions réduites")
     reduced_emotion_counts = df['Emotion_Category'].value_counts().sort_index()
-    fig_reduced_emotion = px.pie(values=reduced_emotion_counts, names=reduced_emotion_counts.index, title="Répartition des émotions réduites", color_discrete_sequence=px.colors.qualitative.Vivid)
+    fig_reduced_emotion = px.pie(
+        values=reduced_emotion_counts,
+        names=reduced_emotion_counts.index,
+        title="Répartition des catégories réduites d'émotions",
+        color_discrete_sequence=px.colors.sequential.Reds
+    )
     st.plotly_chart(fig_reduced_emotion, use_container_width=True)
+    st.markdown("**Description :** Ce graphique montre les proportions des émotions regroupées en catégories réduites.")
 
-    fig_reduced_emotion_gender = px.histogram(df, x='Emotion_Category', color='Gender', barmode='group', title="Répartition des émotions réduites par genre", color_discrete_sequence=px.colors.qualitative.Safe)
+    # Graphique 7 : Catégories réduites par genre
+    st.write("### Répartition des catégories d'émotions réduites par genre")
+    fig_reduced_emotion_gender = px.histogram(
+        df,
+        x='Emotion_Category',
+        color='Gender',
+        barmode='group',
+        title="Répartition des catégories d'émotions réduites par genre",
+        color_discrete_sequence=px.colors.sequential.Oranges
+    )
     st.plotly_chart(fig_reduced_emotion_gender, use_container_width=True)
+    st.markdown("**Description :** Ce graphique montre la répartition des catégories réduites d'émotions selon les genres.")
 
-    st.write("Exemples de données :")
+    # Tableau d'exemples
+    st.write("### Aperçu des données")
     st.dataframe(df.sample(5))
+    st.markdown("**Description :** Tableau présentant un échantillon des données pour en comprendre la structure.")
+
 
 # Fonction principale pour afficher le dashboard
 def main():
-    st.set_page_config(page_title="Dashboard d'Analyse de Sentiment Audio", layout="wide")
+    st.set_page_config(page_title="Dashboard Accessible d'Analyse de Sentiment Audio", layout="wide")
+    
+    st.title("🌟 Dashboard d'Analyse de Sentiment Audio (Accessible)")
+    st.markdown("Ce dashboard est conçu pour être accessible aux utilisateurs en situation de handicap, conformément aux critères WCAG.")   
+    
     left_co, cent_co, last_co = st.columns(3)
     with cent_co:
         st.image("images/banner.jpg", width=400)
@@ -256,7 +342,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Charger le modèle
-    checkpoint_path = "model_and_processor/model_resnet18_V2.pth"
+    checkpoint_path = "model_and_processor/model.pth"
     model = load_model(checkpoint_path)
 
     # Mettre le modèle en mode évaluation
@@ -290,6 +376,7 @@ def main():
                         "negatif": Image.open("images/negatif.jpg")
                     }
                     st.image(sentiment_images[sentiment], width=150, caption=f"Sentiment : {sentiment}")
-
+    # Ajout de texte accessible en cas d'absence de choix
+    st.markdown("**Veuillez sélectionner une option dans la barre latérale.**")
 if __name__ == "__main__":
     main()
